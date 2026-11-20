@@ -32,14 +32,17 @@ const CONFIG = {
   // objectId links to the layer's OBJECTID. Houston set, OBJECTID 3–7.
   // Titles must be unique: the leaderboard groups scores by title.
   // phraseHash = SHA-256 of the secret phrase hidden in that geocache (make it in Host → "Make a hash").
-  // Order follows the paper worksheet (2026-11-19). The layer's Game_type labels differ; the app ignores them.
+  // Order follows the paper worksheet (2026-11-19), except Spot 2 and Spot 5 games swapped on 2026-11-20.
+  // Phrases stay with each physical cache (objectId). The app ignores the layer's Game_type field.
   STATIONS: [
     { objectId: 3, game: "geo", phraseHash: "42e9118d9833d56047e55492535b7250c1d2996ada5570b699183e73ffcad078", title: "Geography · Spot 1", pointsPerCorrect: 5,
       questions: [
         { q: "Which country has the highest waterfall?", choices: ["Bolivia", "Venezuela", "Philippines", "South Africa"], answer: 1 }
       ] },
-    { objectId: 4, game: "points", phraseHash: "c97147d5c731672d8a583714b1886d79e983b4d438e83b0fa737860afb6a48f1", title: "Cornhole · Spot 2",
-      rules: "How many points can your team score in 1 minute? 5 points in the hole, 3 points on the board. The host enters your total." },
+    { objectId: 4, game: "geo", phraseHash: "c97147d5c731672d8a583714b1886d79e983b4d438e83b0fa737860afb6a48f1", title: "Geography · Spot 2", pointsPerCorrect: 5,
+      questions: [
+        { q: "Which is NOT a zone of the ocean?", choices: ["Abyssal zone", "Bathyal zone", "Coastal zone", "Euphotic zone"], answer: 2 }
+      ] },
     { objectId: 5, game: "geo", phraseHash: "79da076caae649f460e40f9b65319100a0b57230a9c44fc5c86af0b3c93cbc07", title: "Geography · Spot 3", pointsPerCorrect: 5,
       questions: [
         { q: "What is the approximate length of the Earth's circumference at the Equator?", choices: ["45,000 miles", "55,000 miles", "35,000 miles", "25,000 miles"], answer: 3 }
@@ -47,10 +50,8 @@ const CONFIG = {
     { objectId: 6, game: "timed", phraseHash: "58e3d99e1d9330096f78b8fe306cc34ab1043768e7935e5fe0630bfda8a60942", title: "Smarties · Spot 4",
       awards: [10, 8, 6, 4, 2], // fastest → slowest; tied times get the same points
       rules: "You'll be timed on how fast you can move your package of Smarties from one cup to the other using the straw. Time stops when the last person finishes. The host records your time." },
-    { objectId: 7, game: "geo", phraseHash: "e81935fb86434cdaaeee21ebe051cca827243ab4cccfdafeee8202004630924e", title: "Geography · Spot 5", pointsPerCorrect: 5,
-      questions: [
-        { q: "Which is NOT a zone of the ocean?", choices: ["Abyssal zone", "Bathyal zone", "Coastal zone", "Euphotic zone"], answer: 2 }
-      ] }
+    { objectId: 7, game: "points", phraseHash: "e81935fb86434cdaaeee21ebe051cca827243ab4cccfdafeee8202004630924e", title: "Cornhole · Spot 5",
+      rules: "How many points can your team score in 1 minute? 5 points in the hole, 3 points on the board. The host enters your total." }
   ],
 
   // Demo mode (add ?demo=1 to the URL): fake points + scores saved in this browser only.

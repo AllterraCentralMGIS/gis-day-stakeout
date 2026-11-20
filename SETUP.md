@@ -40,16 +40,17 @@ To fix a bad score, edit the table yourself in ArcGIS Online.
 
 - **Stations are already mapped** (order = rotation order):
 
-  Source: the paper worksheet, confirmed by Miguel 2026-11-19. It replaced an earlier order
-  taken from the layer's Game_type field.
+  Source: the paper worksheet, confirmed by Miguel 2026-11-19, then changed 2026-11-20:
+  Cornhole moved from Spot 2 to Spot 5, and the ocean-zone question moved from Spot 5 to Spot 2.
+  The paper worksheet still shows the old order (Site #2 = Cornhole).
 
   | Spot | OBJECTID | Game | Scoring |
   |---|---|---|---|
   | 1 | 3 | Geography: highest waterfall (Venezuela) | 5 pts if correct, auto |
-  | 2 | 4 | Cornhole, 1 minute | Host enters points (5 hole, 3 board) |
+  | 2 | 4 | Geography: not an ocean zone (Coastal) | 5 pts if correct, auto |
   | 3 | 5 | Geography: Equator circumference (25,000 mi) | 5 pts if correct, auto |
   | 4 | 6 | Smarties, timed | Host enters time; fastest 10, then 8, 6, 4, 2 |
-  | 5 | 7 | Geography: not an ocean zone (Coastal) | 5 pts if correct, auto |
+  | 5 | 7 | Cornhole, 1 minute | Host enters points (5 hole, 3 board) |
 
   Game_type in the layer was fixed to match on 2026-11-19 (OBJECTID 4 → Cornhole, 6 → Smarties Game,
   7 → Geopardy Questions). Test points OBJECTID 8–15 were deleted the same day; backup in `backup/`.
