@@ -51,8 +51,8 @@ To fix a bad score, edit the table yourself in ArcGIS Online.
   | 4 | 6 | Smarties, timed | Host enters time; fastest 10, then 8, 6, 4, 2 |
   | 5 | 7 | Geography: not an ocean zone (Coastal) | 5 pts if correct, auto |
 
-  **To do:** fix Game_type in the layer to match (OBJECTID 4 → Cornhole, 6 → Smarties, 7 → Geography).
-  The app ignores that field, so this only affects your map.
+  Game_type in the layer was fixed to match on 2026-11-19 (OBJECTID 4 → Cornhole, 6 → Smarties Game,
+  7 → Geopardy Questions). Test points OBJECTID 8–15 were deleted the same day; backup in `backup/`.
 
   Smarties notes: the latest time entered for a group counts. Tied times get the same points.
   Points shift as more groups finish, and are final once all 5 times are in.
@@ -67,6 +67,16 @@ To fix a bad score, edit the table yourself in ArcGIS Online.
 
 Group 1 starts at station 1, Group 2 at station 2, and so on.
 Everyone moves to the next station in order, so no two groups share a spot.
+
+## 4b. Stakeout mode (navigation)
+
+- On the next-stop card, **Start stakeout** opens a full-screen compass.
+- The arrow points at the cache. It uses the phone compass after a tap to allow it (iPhone asks once).
+  Without a compass it shows north-up with "Head northeast · 32°".
+- It shows live distance and GPS accuracy, plus a map with a dashed line from you to the cache.
+- Within **15 m** the dial turns green, the phone buzzes and the phrase box appears.
+  It switches back only past 22 m, so it doesn't flicker at the edge.
+- The screen stays awake while it's open, where the phone allows it.
 
 ## 5. Rehearse
 

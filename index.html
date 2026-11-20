@@ -177,6 +177,38 @@ table.grid th:first-child, table.grid td:first-child { text-align: left; }
 table.grid td.empty { color: var(--line); }
 .banner { background: var(--blaze); color: var(--blaze-ink); padding: 8px 12px; font-size: .8rem; text-align: center; }
 .hidden { display: none !important; }
+[hidden] { display: none !important; }
+
+/* ----- stakeout navigator ----- */
+button.go { width: 100%; margin: 12px 0 2px; font-size: 1.1rem; letter-spacing: .02em; }
+body.nav-open { overflow: hidden; }
+.nav { position: fixed; inset: 0; z-index: 2000; background: var(--paper); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 12px;
+  padding: max(14px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  background-image: repeating-radial-gradient(circle at 50% 38%, transparent 0 46px, color-mix(in srgb, var(--line) 40%, transparent) 46px 47px); }
+.nav-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.nav-top h2 { margin: 8px 0 0; font-size: 1.6rem; line-height: 1.05; }
+.nav-top button { padding: 8px 14px; min-height: 40px; flex: 0 0 auto; }
+.dial { width: min(78vw, 46vh, 340px); aspect-ratio: 1; margin: 0 auto; }
+.dial svg { width: 100%; height: 100%; overflow: visible; }
+.ring-o { fill: var(--paper-2); stroke: var(--ink); stroke-width: 3; }
+.tick { stroke: var(--ink-soft); stroke-width: 1.6; }
+.rose { font: 800 15px "Bricolage Grotesque", sans-serif; fill: var(--ink-soft); text-anchor: middle; dominant-baseline: middle; }
+.rose.n { fill: var(--bad); font-size: 19px; }
+#ring, #needle { transition: transform .25s ease-out; }
+.needle { fill: var(--blaze); stroke: var(--ink); stroke-width: 2.5; stroke-linejoin: round; }
+.hub { fill: var(--ink); }
+.nav.is-close .ring-o { fill: color-mix(in srgb, var(--ok) 22%, var(--paper-2)); stroke: var(--ok); }
+.nav.is-close .needle { fill: var(--ok); }
+.readout { display: grid; justify-items: center; gap: 2px; text-align: center; }
+.readout b { font: 800 clamp(3rem, 15vw, 4.4rem) "Bricolage Grotesque", sans-serif; line-height: 1; font-variant-numeric: tabular-nums; }
+.readout span { font-weight: 600; }
+#navCompass { align-self: center; padding: 10px 16px; min-height: 44px; }
+.arrive { border: 2px solid var(--ok); border-radius: var(--radius); padding: 14px; background: var(--paper-2); }
+.arrive h3 { color: var(--ok); font-weight: 800; }
+#navMap { flex: 1 0 180px; min-height: 180px; border: 2px solid var(--ink); border-radius: var(--radius); }
+.nav-line { stroke: var(--blaze); }
+@media (prefers-reduced-motion: reduce) { #ring, #needle { transition: none; } }
 </style>
 </head>
 <body>
@@ -300,11 +332,51 @@ function meters(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 const fmtDist = m => m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
-let myPos = null, watchId = null;
+function bearingTo(a, b) {
+  const toR = x => x * Math.PI / 180, f1 = toR(a[0]), f2 = toR(b[0]), dl = toR(b[1] - a[1]);
+  const y = Math.sin(dl) * Math.cos(f2), x = Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dl);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+const cardinal = b => ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"][Math.round(b / 45) % 8];
+
+/* GPS: one watch for the whole app; each screen adds a listener, cleared on view change. */
+let myPos = null, myAcc = null, gpsErr = null, watchId = null;
+const gpsListeners = new Set();
 function startGPS(onMove) {
-  if (!navigator.geolocation || watchId !== null) return;
-  watchId = navigator.geolocation.watchPosition(p => { myPos = [p.coords.latitude, p.coords.longitude]; onMove?.(); },
-    () => {}, { enableHighAccuracy: true, maximumAge: 5000 });
+  if (onMove) gpsListeners.add(onMove);
+  if (!navigator.geolocation) { gpsErr = "unsupported"; return; }
+  if (watchId !== null) return;
+  watchId = navigator.geolocation.watchPosition(
+    p => { myPos = [p.coords.latitude, p.coords.longitude]; myAcc = p.coords.accuracy; gpsErr = null; gpsListeners.forEach(f => f()); },
+    e => { gpsErr = e.code === 1 ? "denied" : "unavailable"; gpsListeners.forEach(f => f()); },
+    { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+}
+
+/* Compass: phone heading in degrees from north, smoothed. iOS needs a tap to allow it. */
+let heading = null;
+const headingListeners = new Set();
+function onOrient(e) {
+  let h = null;
+  if (typeof e.webkitCompassHeading === "number") h = e.webkitCompassHeading;
+  else if (e.absolute && e.alpha != null) h = 360 - e.alpha;
+  if (h == null || isNaN(h)) return;
+  h = (h + (screen.orientation?.angle ?? window.orientation ?? 0) + 360) % 360;
+  heading = heading == null ? h : (heading + ((h - heading + 540) % 360 - 180) * 0.3 + 360) % 360;
+  headingListeners.forEach(f => f());
+}
+let compassListening = false;
+async function startCompass() { // call straight from a tap
+  // Always listen: browsers that need no permission just start sending headings.
+  if (!compassListening) {
+    window.addEventListener("deviceorientationabsolute", onOrient);
+    window.addEventListener("deviceorientation", onOrient);
+    compassListening = true;
+  }
+  // iOS Safari only sends headings after this prompt is allowed.
+  if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+    try { return (await DeviceOrientationEvent.requestPermission()) === "granted"; } catch { return false; }
+  }
+  return true;
 }
 
 /* =====================================================================
@@ -312,9 +384,12 @@ function startGPS(onMove) {
    ===================================================================== */
 const app = $("#app");
 let map = null, refreshTimer = null;
+let closeNav = () => {};
 function clearView() {
+  closeNav();
   if (map) { map.remove(); map = null; }
   clearInterval(refreshTimer);
+  gpsListeners.clear();
 }
 function header(sub) {
   const g = store.get("group", null);
@@ -346,6 +421,7 @@ async function viewTeam() {
       <h2 style="margin-top:10px">${esc(locs[nextIdx].name)}</h2>
       <p class="muted" style="margin:0 0 4px">Find the geocache. Inside is a secret phrase.</p>
       <p class="coords" id="nextDist">${locs[nextIdx].lat ? `${locs[nextIdx].lat.toFixed(5)}, ${locs[nextIdx].lng.toFixed(5)}` : ""}</p>
+      ${locs[nextIdx].lat != null ? `<button class="blaze go" id="startNav">Start stakeout <span aria-hidden="true">→</span></button>` : ""}
       <label for="phrase">Secret phrase</label>
       <div class="row"><input id="phrase" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="from the cache">
         <button class="blaze" id="unlockBtn" style="flex:0 0 auto">Unlock</button></div>
@@ -388,18 +464,129 @@ async function viewTeam() {
   };
   startGPS(onMove); onMove();
 
-  // unlock
-  $("#unlockBtn")?.addEventListener("click", async () => {
-    const msg = $("#unlockMsg"); const raw = $("#phrase").value;
+  // unlock (shared by the card and the stakeout screen)
+  async function tryUnlock(raw, msg) {
     if (!normPhrase(raw)) { msg.className = "msg bad"; msg.textContent = "Type the phrase from the cache."; return; }
     const st = CONFIG.STATIONS[nextIdx];
     const ok = DEMO ? normPhrase(raw) === "demo" : (st.phraseHash && await sha256(normPhrase(raw)) === st.phraseHash);
     if (!ok) { msg.className = "msg bad"; msg.textContent = DEMO ? "Nope. (Demo phrase is: demo)" : "Not it. Check the cache again."; return; }
     store.set(`unlocked:${g}`, [...unlocked, nextIdx]);
     store.set("openStation", nextIdx);
+    store.set("navOpen", false);
     render();
-  });
+  }
+  $("#unlockBtn")?.addEventListener("click", () => tryUnlock($("#phrase").value, $("#unlockMsg")));
   $("#phrase")?.addEventListener("keydown", e => { if (e.key === "Enter") $("#unlockBtn").click(); });
+
+  // stakeout navigator
+  $("#startNav")?.addEventListener("click", () => {
+    startCompass(); // must run inside the tap for iOS
+    openNav();
+  });
+  if (store.get("navOpen", false) && nextIdx !== undefined && locs[nextIdx].lat != null) openNav();
+
+  function openNav() {
+    const target = locs[nextIdx], tgt = [target.lat, target.lng];
+    const ARRIVE = 15, LEAVE = 22; // meters; gap stops flicker at the edge
+    let close = false, buzzed = false, shown = 0, ringShown = 0, wake = null, navMap = null, meM = null, line = null;
+    store.set("navOpen", true);
+    const el = document.createElement("div");
+    el.className = "nav"; el.id = "nav";
+    el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "Stakeout navigation");
+    el.innerHTML = `
+      <div class="nav-top">
+        <div><span class="tag">Stakeout · Stop ${route.indexOf(nextIdx) + 1} of ${N()}</span><h2>${esc(target.name)}</h2></div>
+        <button class="ghost" id="navClose">Close</button>
+      </div>
+      <div class="dial" id="dial">
+        <svg viewBox="-110 -110 220 220" aria-hidden="true">
+          <g id="ring">
+            <circle r="100" class="ring-o"/>
+            ${Array.from({ length: 72 }, (_, k) => { const a = k * 5, len = k % 18 === 0 ? 14 : k % 9 === 0 ? 9 : 5;
+              return `<line class="tick" x1="0" y1="${-100 + len}" x2="0" y2="-100" transform="rotate(${a})"/>`; }).join("")}
+            <text class="rose n" x="0" y="-70">N</text><text class="rose" x="70" y="5">E</text>
+            <text class="rose" x="0" y="80">S</text><text class="rose" x="-70" y="5">W</text>
+          </g>
+          <g id="needle"><path class="needle" d="M0,-62 L22,22 L0,10 L-22,22 Z"/></g>
+          <circle r="5" class="hub"/>
+        </svg>
+      </div>
+      <div class="readout">
+        <b id="navDist">—</b>
+        <span id="navDir">Finding you…</span>
+        <span class="coords" id="navAcc"></span>
+      </div>
+      <button class="ghost" id="navCompass" hidden>Turn on compass</button>
+      <div class="arrive" id="navArrive" hidden>
+        <h3>You're close. Search within about ${ARRIVE} m.</h3>
+        <label for="navPhrase">Secret phrase</label>
+        <div class="row"><input id="navPhrase" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="from the cache">
+          <button class="blaze" id="navUnlock" style="flex:0 0 auto">Unlock</button></div>
+        <div class="msg" id="navMsg"></div>
+      </div>
+      <div id="navMap"></div>`;
+    document.body.appendChild(el);
+    document.body.classList.add("nav-open");
+
+    navMap = L.map("navMap", { zoomControl: false, attributionControl: false, dragging: true });
+    L.tileLayer("https://services.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 20, maxNativeZoom: 17 }).addTo(navMap);
+    L.marker(tgt, { icon: L.divIcon({ className: "", html: `<div class="pin next"><span>${route.indexOf(nextIdx) + 1}</span></div>`, iconSize: [30, 30], iconAnchor: [15, 30] }) }).addTo(navMap);
+    navMap.setView(tgt, 18);
+
+    // rotate by the shortest way so the arrow never spins the long way round
+    const turn = (cur, want) => cur + ((want - cur % 360 + 540) % 360 - 180);
+    function draw() {
+      if (!document.getElementById("nav")) return;
+      const dir = $("#navDir"), dist = $("#navDist"), acc = $("#navAcc");
+      if (!myPos) {
+        dir.textContent = gpsErr === "denied" ? "Location is off. Allow location for this site in your browser settings."
+          : gpsErr ? "Can't get a GPS fix. Step outside and away from buildings." : "Finding you…";
+        return;
+      }
+      const d = meters(myPos, tgt), b = bearingTo(myPos, tgt);
+      if (!close && d <= ARRIVE) close = true; else if (close && d > LEAVE) close = false;
+      el.classList.toggle("is-close", close);
+      $("#navArrive").hidden = !close;
+      if (close && !buzzed) { buzzed = true; try { navigator.vibrate?.([120, 80, 120]); } catch {} }
+      if (!close) buzzed = false;
+      dist.textContent = fmtDist(d);
+      const hasHeading = heading != null;
+      // with compass: needle points at the cache relative to the phone; ring shows true north.
+      // without: map-style, north up, needle shows the compass direction to walk.
+      shown = turn(shown, hasHeading ? b - heading : b);
+      ringShown = turn(ringShown, hasHeading ? -heading : 0);
+      $("#needle").setAttribute("transform", `rotate(${shown})`);
+      $("#ring").setAttribute("transform", `rotate(${ringShown})`);
+      el.querySelectorAll(".rose").forEach(t => t.setAttribute("transform", `rotate(${-ringShown} ${t.getAttribute("x")} ${t.getAttribute("y")})`));
+      dir.textContent = close ? "Look around for the cache"
+        : hasHeading ? "Walk where the arrow points" : `Head ${cardinal(b)} · ${Math.round(b)}°`;
+      acc.textContent = myAcc != null ? `GPS ±${Math.round(myAcc)} m${myAcc > 25 ? " · weak signal, keep moving" : ""}` : "";
+      $("#navCompass").hidden = hasHeading;
+      if (meM) meM.setLatLng(myPos); else meM = L.marker(myPos, { icon: L.divIcon({ className: "", html: '<div class="me-dot"></div>', iconSize: [16, 16] }) }).addTo(navMap);
+      if (line) line.setLatLngs([myPos, tgt]); else line = L.polyline([myPos, tgt], { className: "nav-line", weight: 3, dashArray: "6 8" }).addTo(navMap);
+      navMap.fitBounds([myPos, tgt], { padding: [40, 40], maxZoom: 19, animate: false });
+    }
+    headingListeners.add(draw);
+    startGPS(draw);
+    draw();
+
+    try { navigator.wakeLock?.request("screen").then(w => { wake = w; }).catch(() => {}); } catch {}
+    $("#navCompass").addEventListener("click", async () => {
+      const ok = await startCompass();
+      if (!ok) { $("#navCompass").textContent = "Compass not available"; $("#navCompass").disabled = true; }
+      setTimeout(draw, 600);
+    });
+    $("#navUnlock").addEventListener("click", () => tryUnlock($("#navPhrase").value, $("#navMsg")));
+    $("#navPhrase").addEventListener("keydown", e => { if (e.key === "Enter") $("#navUnlock").click(); });
+    closeNav = () => {
+      headingListeners.delete(draw); gpsListeners.delete(draw);
+      try { wake?.release(); } catch {}
+      navMap?.remove(); el.remove(); document.body.classList.remove("nav-open");
+      closeNav = () => {};
+    };
+    $("#navClose").addEventListener("click", () => { store.set("navOpen", false); closeNav(); });
+  }
   document.querySelectorAll("button.open").forEach(b => b.addEventListener("click", () => { store.set("openStation", +b.dataset.i); showStation(+b.dataset.i, g, locs); }));
   $("#switchGroup").addEventListener("click", () => { if (confirm("Switch to a different group on this phone?")) { store.set("group", null); render(); } });
 
