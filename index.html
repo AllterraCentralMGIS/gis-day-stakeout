@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Stakeout · GIS Day</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* =====================================================================
+   CONFIG — the only part you should need to edit.
+   ===================================================================== */
+const CONFIG = {
+  // Game locations (must be shared with Everyone in ArcGIS Online)
+  LOCATIONS_URL: "https://services7.arcgis.com/uogxfRl0SjqFnxci/arcgis/rest/services/Game_Locations_1/FeatureServer/0",
+  NAME_FIELD: "",               // optional field holding a location name; blank = use the station title below
+
+  // Scores table (hosted table, shared with Everyone, editing on: "Add" only)
+  SCORES_URL: "https://services7.arcgis.com/uogxfRl0SjqFnxci/arcgis/rest/services/GIS_Day_Scores/FeatureServer/0",
+
+  // Schools (2026-11-19): King, DeKaney, Energy Institute, Lee, Humble, Northbrook.
+  // Two share one group — pair not decided yet. Order = as listed; the shared group goes last.
+  // Set final names BEFORE GIS Day: scores are saved under these exact names.
+  GROUPS: ["Group 1", "Group 2", "Group 3", "Group 4", "Group 5"],
+
+  // Host PIN, stored as a SHA-256 hash. Make a new one in Host → "Make a hash".
+  HOST_PIN_HASH: "2926a2731f4b312c08982cacf8061eb14bf65c1a87cc5d70e864e079c6220731",
+
+  // One entry per location, in rotation order (= Location_Number 1–5).
+  // objectId links to the layer's OBJECTID. Houston set, OBJECTID 3–7.
+  // Titles must be unique: the leaderboard groups scores by title.
+  // phraseHash = SHA-256 of the secret phrase hidden in that geocache (make it in Host → "Make a hash").
+  // Order follows the paper worksheet (2026-11-19). The layer's Game_type labels differ; the app ignores them.
+  STATIONS: [
+    { objectId: 3, game: "geo", phraseHash: "42e9118d9833d56047e55492535b7250c1d2996ada5570b699183e73ffcad078", title: "Geography · Spot 1", pointsPerCorrect: 5,
+      questions: [
+        { q: "Which country has the highest waterfall?", choices: ["Bolivia", "Venezuela", "Philippines", "South Africa"], answer: 1 }
+      ] },
+    { objectId: 4, game: "points", phraseHash: "c97147d5c731672d8a583714b1886d79e983b4d438e83b0fa737860afb6a48f1", title: "Cornhole · Spot 2",
+      rules: "How many points can your team score in 1 minute? 5 points in the hole, 3 points on the board. The host enters your total." },
+    { objectId: 5, game: "geo", phraseHash: "79da076caae649f460e40f9b65319100a0b57230a9c44fc5c86af0b3c93cbc07", title: "Geography · Spot 3", pointsPerCorrect: 5,
+      questions: [
+        { q: "What is the approximate length of the Earth's circumference at the Equator?", choices: ["45,000 miles", "55,000 miles", "35,000 miles", "25,000 miles"], answer: 3 }
+      ] },
+    { objectId: 6, game: "timed", phraseHash: "58e3d99e1d9330096f78b8fe306cc34ab1043768e7935e5fe0630bfda8a60942", title: "Smarties · Spot 4",
+      awards: [10, 8, 6, 4, 2], // fastest → slowest; tied times get the same points
+      rules: "You'll be timed on how fast you can move your package of Smarties from one cup to the other using the straw. Time stops when the last person finishes. The host records your time." },
+    { objectId: 7, game: "geo", phraseHash: "e81935fb86434cdaaeee21ebe051cca827243ab4cccfdafeee8202004630924e", title: "Geography · Spot 5", pointsPerCorrect: 5,
+      questions: [
+        { q: "Which is NOT a zone of the ocean?", choices: ["Abyssal zone", "Bathyal zone", "Coastal zone", "Euphotic zone"], answer: 2 }
+      ] }
+  ],
+
+  // Demo mode (add ?demo=1 to the URL): fake points + scores saved in this browser only.
+  DEMO_CENTER: [29.7215, -95.4579]
+};
+</script>
+<style>
+:root {
+  --paper: #f3efe4;
+  --paper-2: #e8e2d1;
+  --ink: #1d2a24;
+  --ink-soft: #55625b;
+  --line: #c9c0a8;
+  --forest: #23513b;
+  --blaze: #e8591a;      /* survey-flag orange */
+  --blaze-ink: #ffffff;
+  --ok: #2f7a4f;
+  --bad: #b3261e;
+  --radius: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #151b18; --paper-2: #1e2622; --ink: #ece6d6; --ink-soft: #a3ab9f;
+    --line: #34403a; --forest: #7fc29b; --blaze: #ff7a3d; --blaze-ink: #1a0d05;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.45 "IBM Plex Mono", ui-monospace, monospace;
+  background-image:
+    repeating-radial-gradient(circle at 85% -10%, transparent 0 38px, color-mix(in srgb, var(--line) 45%, transparent) 38px 39px);
+  background-attachment: fixed;
+}
+h1, h2, h3, .display { font-family: "Bricolage Grotesque", system-ui, sans-serif; letter-spacing: -0.01em; }
+h1 { font-weight: 800; font-size: clamp(2.2rem, 9vw, 3.4rem); line-height: .95; margin: 0; }
+h2 { font-weight: 800; font-size: 1.5rem; margin: 0 0 .5rem; }
+h3 { font-weight: 500; font-size: 1.1rem; margin: 0; }
+.wrap { max-width: 640px; margin: 0 auto; padding: 16px 16px 96px; }
+.tag { display: inline-block; font-size: .72rem; text-transform: uppercase; letter-spacing: .12em;
+  border: 1.5px solid currentColor; padding: 2px 7px; border-radius: 3px; }
+.muted { color: var(--ink-soft); }
+.coords { font-size: .78rem; color: var(--ink-soft); }
+
+header.top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; padding: 8px 0 18px;
+  border-bottom: 2px solid var(--ink); margin-bottom: 18px; }
+header.top .who { text-align: right; font-size: .8rem; }
+header.top .who b { display: block; font-family: "Bricolage Grotesque", sans-serif; font-size: 1.25rem; color: var(--blaze); }
+
+button, .btn {
+  font: 600 1rem "IBM Plex Mono", monospace; cursor: pointer;
+  background: var(--ink); color: var(--paper); border: 0; border-radius: var(--radius);
+  padding: 13px 18px; min-height: 48px;
+}
+button.blaze { background: var(--blaze); color: var(--blaze-ink); }
+button.ghost { background: transparent; color: var(--ink); border: 1.5px solid var(--ink); }
+button:disabled { opacity: .45; cursor: default; }
+input, select {
+  font: 1rem "IBM Plex Mono", monospace; color: var(--ink); background: var(--paper);
+  border: 1.5px solid var(--ink); border-radius: var(--radius); padding: 12px; min-height: 48px; width: 100%;
+}
+label { display: block; font-size: .78rem; text-transform: uppercase; letter-spacing: .1em; margin: 14px 0 6px; }
+
+.groups { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
+.groups button { font-family: "Bricolage Grotesque", sans-serif; font-size: 1.3rem; font-weight: 800; padding: 22px 10px; }
+.groups button:last-child:nth-child(odd) { grid-column: span 2; }
+
+#map { height: 300px; border: 2px solid var(--ink); border-radius: var(--radius); margin-bottom: 18px; }
+.leaflet-container { font-family: "IBM Plex Mono", monospace; }
+.pin { width: 30px; height: 30px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
+  background: var(--paper); border: 2.5px solid var(--ink); display: grid; place-items: center; }
+.pin span { transform: rotate(45deg); font: 800 13px "Bricolage Grotesque", sans-serif; color: var(--ink); }
+.pin.next { background: var(--blaze); border-color: var(--ink); }
+.pin.next span { color: var(--blaze-ink); }
+.pin.done { background: var(--forest); }
+.pin.done span { color: var(--paper); }
+.me-dot { width: 16px; height: 16px; border-radius: 50%; background: #2a7de1; border: 3px solid #fff; box-shadow: 0 0 0 2px #2a7de1; }
+
+.route { list-style: none; margin: 0; padding: 0; counter-reset: stop; }
+.route li { display: grid; grid-template-columns: 44px 1fr auto; gap: 12px; align-items: center;
+  padding: 14px 0; border-bottom: 1.5px dashed var(--line); }
+.route li .n { width: 44px; height: 44px; border: 2px solid var(--ink); border-radius: 50%; display: grid; place-items: center;
+  font: 800 1.1rem "Bricolage Grotesque", sans-serif; }
+.route li.next .n { background: var(--blaze); color: var(--blaze-ink); border-color: var(--blaze); }
+.route li.done .n { background: var(--forest); color: var(--paper); border-color: var(--forest); }
+.route li.done h3 { text-decoration: line-through; text-decoration-thickness: 2px; color: var(--ink-soft); }
+.route .dist { font-size: .8rem; color: var(--ink-soft); }
+
+.card { background: var(--paper-2); border: 2px solid var(--ink); border-radius: var(--radius); padding: 18px; margin: 16px 0; }
+.card.blaze { border-color: var(--blaze); box-shadow: 6px 6px 0 var(--blaze); }
+.row { display: flex; gap: 10px; }
+.row > * { flex: 1; }
+.msg { margin-top: 10px; font-weight: 600; min-height: 1.4em; }
+.msg.bad { color: var(--bad); } .msg.ok { color: var(--ok); }
+
+.q { margin: 18px 0; }
+.q p { font-weight: 600; margin: 0 0 8px; }
+.choice { display: flex; gap: 10px; align-items: center; padding: 11px 12px; border: 1.5px solid var(--line);
+  border-radius: var(--radius); margin: 6px 0; cursor: pointer; text-transform: none; letter-spacing: 0; font-size: .95rem; }
+.choice input { width: 20px; height: 20px; min-height: 0; margin: 0; accent-color: var(--blaze); }
+.choice.right { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.choice.wrong { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+
+nav.tabs { position: fixed; left: 0; right: 0; bottom: 0; display: flex; background: var(--ink);
+  padding-bottom: env(safe-area-inset-bottom); z-index: 1000; }
+nav.tabs a { flex: 1; text-align: center; padding: 14px 4px; color: var(--paper); text-decoration: none;
+  font-size: .78rem; text-transform: uppercase; letter-spacing: .1em; }
+nav.tabs a.on { background: var(--blaze); color: var(--blaze-ink); font-weight: 600; }
+
+/* leaderboard */
+.board { list-style: none; padding: 0; margin: 0; }
+.board li { display: grid; grid-template-columns: 52px 1fr auto; align-items: center; gap: 12px; padding: 14px 0;
+  border-bottom: 2px solid var(--ink); }
+.board .rank { font: 800 2rem "Bricolage Grotesque", sans-serif; color: var(--ink-soft); }
+.board li:first-child .rank { color: var(--blaze); }
+.board .pts { font: 800 2rem "Bricolage Grotesque", sans-serif; }
+.bar { height: 8px; background: var(--line); border-radius: 4px; margin-top: 6px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--forest); }
+table.grid { width: 100%; border-collapse: collapse; margin-top: 22px; font-size: .82rem; }
+table.grid th, table.grid td { border: 1px solid var(--line); padding: 7px 5px; text-align: center; }
+table.grid th:first-child, table.grid td:first-child { text-align: left; }
+table.grid td.empty { color: var(--line); }
+.banner { background: var(--blaze); color: var(--blaze-ink); padding: 8px 12px; font-size: .8rem; text-align: center; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="demoBanner" class="banner hidden">DEMO MODE · fake locations · scores saved on this phone only</div>
+<div class="wrap" id="app"></div>
+<nav class="tabs">
+  <a href="#team" data-tab="team">My Route</a>
+  <a href="#board" data-tab="board">Leaderboard</a>
+  <a href="#host" data-tab="host">Host</a>
+</nav>
+
+<script>
+const DEMO = new URLSearchParams(location.search).has("demo");
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const mem = {};
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("stakeout:" + k); if (v !== null) return JSON.parse(v) ?? d; } catch {} return k in mem ? mem[k] : d; },
+  set(k, v) { mem[k] = v; try { localStorage.setItem("stakeout:" + k, JSON.stringify(v)); } catch {} }
+};
+const hostSession = {
+  ok: false,
+  get() { try { return sessionStorage.getItem("stakeout:host") === "1"; } catch { return this.ok; } },
+  set() { this.ok = true; try { sessionStorage.setItem("stakeout:host", "1"); } catch {} }
+};
+async function sha256(text) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+const normPhrase = s => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/* ---------- data: locations ---------- */
+let LOCATIONS = null; // [{station, idx, name, lat, lng}]
+async function loadLocations() {
+  if (LOCATIONS) return LOCATIONS;
+  let feats;
+  if (DEMO) {
+    const [la, ln] = CONFIG.DEMO_CENTER;
+    feats = CONFIG.STATIONS.map((s, i) => ({ id: s.objectId, name: `Demo Spot ${i + 1}`,
+      lat: la + Math.sin(i * 1.26) * 0.0018, lng: ln + Math.cos(i * 1.26) * 0.0024 }));
+  } else {
+    const ids = CONFIG.STATIONS.map(s => s.objectId).join(",");
+    const url = `${CONFIG.LOCATIONS_URL}/query?objectIds=${ids}&outFields=*&outSR=4326&returnGeometry=true&f=json`;
+    const r = await fetch(url);
+    const j = await r.json();
+    if (j.error) throw new Error(j.error.code === 499 || j.error.code === 498
+      ? "The Game_Locations layer is still private. Share it with Everyone in ArcGIS Online."
+      : j.error.message);
+    const oidField = j.objectIdFieldName || "OBJECTID";
+    const nameField = CONFIG.NAME_FIELD;
+    feats = j.features.map(f => ({ id: f.attributes[oidField], name: nameField ? f.attributes[nameField] : null,
+      lat: f.geometry.y, lng: f.geometry.x }));
+  }
+  LOCATIONS = CONFIG.STATIONS.map((s, idx) => {
+    const f = feats.find(x => x.id === s.objectId);
+    return { station: s, idx, name: f?.name || s.title, lat: f?.lat, lng: f?.lng, missing: !f };
+  });
+  return LOCATIONS;
+}
+
+/* ---------- data: scores ---------- */
+const scores = {
+  async list() {
+    if (DEMO) return store.get("demoScores", []);
+    if (!CONFIG.SCORES_URL) throw new Error("No scores table yet. Add SCORES_URL in the config.");
+    const r = await fetch(`${CONFIG.SCORES_URL}/query?where=1%3D1&outFields=*&f=json&_=${Date.now()}`);
+    const j = await r.json();
+    if (j.error) throw new Error(j.error.message);
+    return j.features.map(f => f.attributes);
+  },
+  async add(rec) {
+    if (DEMO) { const all = store.get("demoScores", []); all.push({ ...rec, OBJECTID: all.length + 1 }); store.set("demoScores", all); return; }
+    const body = new URLSearchParams({ f: "json", features: JSON.stringify([{ attributes: rec }]) });
+    const r = await fetch(`${CONFIG.SCORES_URL}/addFeatures`, { method: "POST", body });
+    const j = await r.json();
+    const res = j.addResults?.[0];
+    if (j.error || !res?.success) throw new Error(j.error?.message || res?.error?.description || "Save failed");
+  }
+};
+
+/* ---------- scoring ----------
+   points/geo stations: sum of rows. timed stations: latest time per group counts,
+   ranked fastest first, awarded st.awards[rank]; tied times share a rank. */
+const fmtTime = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+function parseTime(v) {
+  v = String(v).trim();
+  const m = v.match(/^(\d+):([0-5]?\d)$/);
+  if (m) return +m[1] * 60 + +m[2];
+  return /^\d+(\.\d+)?$/.test(v) ? Math.round(+v) : NaN;
+}
+function computeScores(rows) {
+  const pts = {}, times = {};
+  CONFIG.GROUPS.forEach(g => { pts[g] = {}; times[g] = {}; });
+  CONFIG.STATIONS.forEach(st => {
+    const rs = rows.filter(r => r.station === st.title && pts[r.team]);
+    if (st.game === "timed") {
+      const latest = {};
+      rs.forEach(r => { if (!latest[r.team] || r.OBJECTID > latest[r.team].OBJECTID) latest[r.team] = r; });
+      const sorted = Object.values(latest).sort((a, b) => a.points - b.points);
+      sorted.forEach(r => {
+        const rank = sorted.findIndex(x => x.points === r.points);
+        pts[r.team][st.title] = st.awards[rank] ?? 0;
+        times[r.team][st.title] = r.points;
+      });
+    } else {
+      rs.forEach(r => { pts[r.team][st.title] = (pts[r.team][st.title] || 0) + (+r.points || 0); });
+    }
+  });
+  return { pts, times };
+}
+
+/* ---------- rotation: group g, round r → station (g + r) mod N ---------- */
+const N = () => CONFIG.STATIONS.length;
+const routeFor = g => Array.from({ length: N() }, (_, r) => (g + r) % N());
+
+/* ---------- geometry ---------- */
+function meters(a, b) {
+  const R = 6371000, toR = x => x * Math.PI / 180;
+  const dLat = toR(b[0] - a[0]), dLng = toR(b[1] - a[1]);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a[0])) * Math.cos(toR(b[0])) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+const fmtDist = m => m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
+let myPos = null, watchId = null;
+function startGPS(onMove) {
+  if (!navigator.geolocation || watchId !== null) return;
+  watchId = navigator.geolocation.watchPosition(p => { myPos = [p.coords.latitude, p.coords.longitude]; onMove?.(); },
+    () => {}, { enableHighAccuracy: true, maximumAge: 5000 });
+}
+
+/* =====================================================================
+   VIEWS
+   ===================================================================== */
+const app = $("#app");
+let map = null, refreshTimer = null;
+function clearView() {
+  if (map) { map.remove(); map = null; }
+  clearInterval(refreshTimer);
+}
+function header(sub) {
+  const g = store.get("group", null);
+  return `<header class="top"><div><span class="tag">GIS Day · Stakeout</span><h1 style="margin-top:10px">${sub}</h1></div>
+    ${g !== null ? `<div class="who">playing as<b>${esc(CONFIG.GROUPS[g])}</b></div>` : ""}</header>`;
+}
+function errorCard(e) {
+  return `<div class="card"><h2>Can't load the game</h2><p>${esc(e.message)}</p>
+    <p class="muted">Organizers: try <a href="?demo=1${location.hash}">demo mode</a> to rehearse.</p></div>`;
+}
+
+/* ----- TEAM ----- */
+async function viewTeam() {
+  const g = store.get("group", null);
+  if (g === null) return viewPickGroup();
+  app.innerHTML = header("Your route") + `<p class="muted">Loading map…</p>`;
+  let locs; try { locs = await loadLocations(); } catch (e) { app.innerHTML = header("Your route") + errorCard(e); return; }
+  const unlocked = store.get(`unlocked:${g}`, []);
+  const route = routeFor(g);
+  const nextIdx = route.find(i => !unlocked.includes(i));
+  const missing = locs.filter(l => l.missing);
+
+  app.innerHTML = header("Your route") + `
+    ${missing.length ? `<div class="card"><b>Config check:</b> no layer point for OBJECTID ${missing.map(m => m.station.objectId).join(", ")}.</div>` : ""}
+    <div id="map"></div>
+    ${nextIdx !== undefined ? `
+    <div class="card blaze">
+      <span class="tag" style="color:var(--blaze)">Stop ${route.indexOf(nextIdx) + 1} of ${N()}</span>
+      <h2 style="margin-top:10px">${esc(locs[nextIdx].name)}</h2>
+      <p class="muted" style="margin:0 0 4px">Find the geocache. Inside is a secret phrase.</p>
+      <p class="coords" id="nextDist">${locs[nextIdx].lat ? `${locs[nextIdx].lat.toFixed(5)}, ${locs[nextIdx].lng.toFixed(5)}` : ""}</p>
+      <label for="phrase">Secret phrase</label>
+      <div class="row"><input id="phrase" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="from the cache">
+        <button class="blaze" id="unlockBtn" style="flex:0 0 auto">Unlock</button></div>
+      <div class="msg" id="unlockMsg"></div>
+    </div>` : `<div class="card blaze"><h2>Route complete</h2><p>All ${N()} caches found. Head back and check the leaderboard.</p></div>`}
+    <h2 style="margin-top:26px">Rotation</h2>
+    <ol class="route">${route.map((i, r) => {
+      const st = unlocked.includes(i) ? "done" : i === nextIdx ? "next" : "";
+      return `<li class="${st}" data-i="${i}"><div class="n">${r + 1}</div>
+        <div><h3>${esc(locs[i].name)}</h3><div class="dist" data-dist="${i}">${st === "done" ? "found" : ""}</div></div>
+        ${st === "done" ? `<button class="ghost open" data-i="${i}" style="padding:8px 12px;min-height:40px">Open</button>` : ""}</li>`;
+    }).join("")}</ol>
+    <div id="stationDetail"></div>
+    <p style="margin-top:28px"><button class="ghost" id="switchGroup">Switch group</button></p>`;
+
+  // map
+  map = L.map("map", { zoomControl: false, attributionControl: true });
+  L.tileLayer("https://services.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom: 20, maxNativeZoom: 17, attribution: "Tiles © Esri" }).addTo(map);
+  const pts = [];
+  route.forEach((i, r) => {
+    const l = locs[i]; if (l.lat == null) return;
+    const cls = unlocked.includes(i) ? "done" : i === nextIdx ? "next" : "";
+    L.marker([l.lat, l.lng], { icon: L.divIcon({ className: "", html: `<div class="pin ${cls}"><span>${r + 1}</span></div>`, iconSize: [30, 30], iconAnchor: [15, 30] }) })
+      .addTo(map).bindPopup(`<b>${r + 1}. ${esc(l.name)}</b>`);
+    pts.push([l.lat, l.lng]);
+  });
+  if (pts.length) map.fitBounds(pts, { padding: [36, 36], maxZoom: 18 }); else map.setView(CONFIG.DEMO_CENTER, 15);
+  let meMarker = null;
+  const onMove = () => {
+    if (!map || !myPos) return;
+    if (!meMarker) meMarker = L.marker(myPos, { icon: L.divIcon({ className: "", html: '<div class="me-dot"></div>', iconSize: [16, 16] }) }).addTo(map);
+    else meMarker.setLatLng(myPos);
+    document.querySelectorAll("[data-dist]").forEach(el => {
+      const l = locs[+el.dataset.dist];
+      if (!unlocked.includes(+el.dataset.dist) && l.lat != null) el.textContent = fmtDist(meters(myPos, [l.lat, l.lng])) + " away";
+    });
+    const nd = $("#nextDist"); if (nd && nextIdx !== undefined && locs[nextIdx].lat != null)
+      nd.textContent = fmtDist(meters(myPos, [locs[nextIdx].lat, locs[nextIdx].lng])) + " away";
+  };
+  startGPS(onMove); onMove();
+
+  // unlock
+  $("#unlockBtn")?.addEventListener("click", async () => {
+    const msg = $("#unlockMsg"); const raw = $("#phrase").value;
+    if (!normPhrase(raw)) { msg.className = "msg bad"; msg.textContent = "Type the phrase from the cache."; return; }
+    const st = CONFIG.STATIONS[nextIdx];
+    const ok = DEMO ? normPhrase(raw) === "demo" : (st.phraseHash && await sha256(normPhrase(raw)) === st.phraseHash);
+    if (!ok) { msg.className = "msg bad"; msg.textContent = DEMO ? "Nope. (Demo phrase is: demo)" : "Not it. Check the cache again."; return; }
+    store.set(`unlocked:${g}`, [...unlocked, nextIdx]);
+    store.set("openStation", nextIdx);
+    render();
+  });
+  $("#phrase")?.addEventListener("keydown", e => { if (e.key === "Enter") $("#unlockBtn").click(); });
+  document.querySelectorAll("button.open").forEach(b => b.addEventListener("click", () => { store.set("openStation", +b.dataset.i); showStation(+b.dataset.i, g, locs); }));
+  $("#switchGroup").addEventListener("click", () => { if (confirm("Switch to a different group on this phone?")) { store.set("group", null); render(); } });
+
+  const open = store.get("openStation", null);
+  if (open !== null && unlocked.includes(open)) showStation(open, g, locs);
+}
+
+function showStation(i, g, locs) {
+  const st = CONFIG.STATIONS[i]; const box = $("#stationDetail");
+  if (st.game !== "geo") {
+    box.innerHTML = `<div class="card blaze" id="stationCard"><span class="tag" style="color:var(--blaze)">Unlocked</span>
+      <h2 style="margin-top:10px">${esc(st.title)}</h2><p>${esc(st.rules)}</p>
+      ${st.game === "timed" ? `<p class="muted">Fastest group gets ${st.awards[0]} pts, then ${st.awards.slice(1).join(", ")}.</p>` : ""}</div>`;
+  } else {
+    const doneKey = `quizDone:${g}:${i}`;
+    const done = store.get(doneKey, null);
+    box.innerHTML = `<div class="card blaze" id="stationCard"><span class="tag" style="color:var(--blaze)">Unlocked</span>
+      <h2 style="margin-top:10px">${esc(st.title)}</h2>
+      <p class="muted">${st.questions.length === 1 ? `1 question · ${st.pointsPerCorrect} pts` : `${st.questions.length} questions · ${st.pointsPerCorrect} pts each`} · one try, answer as a group.</p>
+      <form id="quiz">${st.questions.map((q, qi) => `<div class="q"><p>${qi + 1}. ${esc(q.q)}</p>
+        ${q.choices.map((c, ci) => `<label class="choice" data-q="${qi}" data-c="${ci}"><input type="radio" name="q${qi}" value="${ci}" ${done ? "disabled" : ""} ${done && done.picks[qi] === ci ? "checked" : ""}>${esc(c)}</label>`).join("")}
+        </div>`).join("")}
+        ${done ? `<p class="msg ok">Submitted: ${done.points} pts</p>` : `<button class="blaze" type="submit" style="width:100%">Submit answers</button><div class="msg" id="quizMsg"></div>`}
+      </form></div>`;
+    const mark = picks => st.questions.forEach((q, qi) => {
+      box.querySelectorAll(`.choice[data-q="${qi}"]`).forEach(el => {
+        const ci = +el.dataset.c;
+        if (ci === q.answer) el.classList.add("right"); else if (ci === picks[qi]) el.classList.add("wrong");
+      });
+    });
+    if (done) mark(done.picks);
+    $("#quiz").addEventListener("submit", async e => {
+      e.preventDefault();
+      const picks = st.questions.map((_, qi) => { const c = $(`input[name=q${qi}]:checked`, box); return c ? +c.value : null; });
+      const msg = $("#quizMsg");
+      if (picks.includes(null)) { msg.className = "msg bad"; msg.textContent = "Answer every question first."; return; }
+      if (!confirm("Lock in your answers? One try only.")) return;
+      const points = picks.filter((p, qi) => p === st.questions[qi].answer).length * st.pointsPerCorrect;
+      const btn = $("#quiz button"); btn.disabled = true; msg.className = "msg"; msg.textContent = "Saving…";
+      try {
+        const existing = (await scores.list()).find(s => s.team === CONFIG.GROUPS[g] && s.station === st.title);
+        if (!existing) await scores.add({ team: CONFIG.GROUPS[g], station: st.title, points, entered_by: "quiz" });
+        store.set(doneKey, { picks, points: existing ? existing.points : points });
+        showStation(i, g, locs);
+      } catch (err) { btn.disabled = false; msg.className = "msg bad"; msg.textContent = "Couldn't save: " + err.message + " Try again."; }
+    });
+  }
+  $("#stationCard").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function viewPickGroup() {
+  app.innerHTML = header("Stake&shy;out") + `
+    <p>Five caches. Five groups. Find each geocache, grab the secret phrase, and unlock the game hiding there.</p>
+    <h2 style="margin-top:22px">Which group are you?</h2>
+    <div class="groups">${CONFIG.GROUPS.map((n, i) => `<button data-g="${i}" class="${i % 2 ? "" : "blaze"}">${esc(n)}</button>`).join("")}</div>`;
+  app.querySelectorAll("[data-g]").forEach(b => b.addEventListener("click", () => {
+    if (confirm(`You're ${CONFIG.GROUPS[b.dataset.g]}? This sets your route.`)) { store.set("group", +b.dataset.g); render(); }
+  }));
+}
+
+/* ----- LEADERBOARD ----- */
+async function viewBoard() {
+  app.innerHTML = header("Leaderboard") + `<div id="boardBody"><p class="muted">Loading scores…</p></div>`;
+  const draw = async () => {
+    const body = $("#boardBody"); if (!body) return;
+    let rows; try { rows = await scores.list(); } catch (e) { body.innerHTML = errorCard(e); return; }
+    const titles = CONFIG.STATIONS.map(s => s.title);
+    const sc = computeScores(rows);
+    const totals = CONFIG.GROUPS.map(gn => ({ gn, pts: Object.values(sc.pts[gn]).reduce((a, p) => a + p, 0) }))
+      .sort((a, b) => b.pts - a.pts);
+    const max = Math.max(1, ...totals.map(t => t.pts));
+    let rank = 0, prev = null;
+    body.innerHTML = `<ol class="board">${totals.map((t, k) => { if (t.pts !== prev) rank = k + 1; prev = t.pts;
+      return `<li><div class="rank">${rank}</div><div><h3>${esc(t.gn)}</h3><div class="bar"><i style="width:${t.pts / max * 100}%"></i></div></div><div class="pts">${t.pts}</div></li>`; }).join("")}</ol>
+      <table class="grid"><thead><tr><th>Group</th>${titles.map((_, i) => `<th>${i + 1}</th>`).join("")}</tr></thead><tbody>
+      ${CONFIG.GROUPS.map(gn => `<tr><td>${esc(gn)}</td>${titles.map(t => { const p = sc.pts[gn][t], tm = sc.times[gn][t];
+        return p === undefined ? `<td class="empty">·</td>` : `<td>${p}${tm !== undefined ? `<br><span class="coords">${fmtTime(tm)}</span>` : ""}</td>`; }).join("")}</tr>`).join("")}
+      </tbody></table>
+      <p class="coords" style="margin-top:8px">${titles.map((t, i) => `${i + 1} ${esc(t)}`).join(" · ")}</p>
+      <p class="coords">Updates every 15 s · last ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}</p>`;
+  };
+  await draw();
+  refreshTimer = setInterval(draw, 15000);
+}
+
+/* ----- HOST ----- */
+function viewHost() {
+  if (!hostSession.get()) {
+    app.innerHTML = header("Host") + `<div class="card"><p>Station hosts only.</p>
+      <label for="pin">Host PIN</label><input id="pin" type="password" inputmode="numeric">
+      <button style="margin-top:12px;width:100%" id="pinBtn">Enter</button><div class="msg" id="pinMsg"></div></div>`;
+    const go = async () => {
+      if (await sha256($("#pin").value.trim()) === CONFIG.HOST_PIN_HASH) { hostSession.set(); render(); }
+      else { $("#pinMsg").className = "msg bad"; $("#pinMsg").textContent = "Wrong PIN."; }
+    };
+    $("#pinBtn").addEventListener("click", go);
+    $("#pin").addEventListener("keydown", e => e.key === "Enter" && go());
+    return;
+  }
+  const lastStation = store.get("hostStation", "");
+  app.innerHTML = header("Host") + `
+    <div class="card blaze">
+      <h2>Enter a score</h2>
+      <label for="hStation">Your station</label>
+      <select id="hStation">${CONFIG.STATIONS.map(s => `<option ${s.title === lastStation ? "selected" : ""}>${esc(s.title)}</option>`).join("")}</select>
+      <label for="hGroup">Group</label>
+      <select id="hGroup"><option value="">Pick a group…</option>${CONFIG.GROUPS.map(g => `<option>${esc(g)}</option>`).join("")}</select>
+      <label for="hPts" id="hPtsLabel">Points</label>
+      <input id="hPts" inputmode="numeric" autocomplete="off">
+      <button class="blaze" id="hSave" style="width:100%;margin-top:14px">Save score</button>
+      <div class="msg" id="hMsg"></div>
+    </div>
+    <div class="card"><h3>Your station's scores</h3><div id="hList" class="muted" style="margin-top:8px">…</div></div>
+    <details class="card"><summary><b>Make a hash</b> (organizer setup)</summary>
+      <p class="muted">Turn a secret phrase or PIN into the hash for the config. Phrases ignore case, spaces and punctuation.</p>
+      <label for="hashIn">Phrase or PIN</label><input id="hashIn" autocomplete="off">
+      <div class="row" style="margin-top:10px"><button class="ghost" id="hashPhrase">As phrase</button><button class="ghost" id="hashPin">As PIN</button></div>
+      <p class="coords" id="hashOut" style="word-break:break-all;margin-top:10px"></p></details>`;
+
+  const stOf = title => CONFIG.STATIONS.find(s => s.title === title);
+  const setMode = () => {
+    const timed = stOf($("#hStation").value)?.game === "timed";
+    $("#hPtsLabel").textContent = timed ? "Time (m:ss or seconds)" : "Points";
+    $("#hPts").placeholder = timed ? "e.g. 1:25" : "e.g. 21";
+    $("#hPts").inputMode = timed ? "decimal" : "numeric";
+  };
+  const listMine = async () => {
+    const t = $("#hStation").value; const box = $("#hList"); const st = stOf(t);
+    try {
+      const rows = await scores.list();
+      if (st.game === "timed") {
+        const sc = computeScores(rows);
+        const done = CONFIG.GROUPS.filter(g => sc.times[g][t] !== undefined).sort((a, b) => sc.times[a][t] - sc.times[b][t]);
+        box.innerHTML = done.length ? done.map(g => `${esc(g)}: <b>${fmtTime(sc.times[g][t])}</b> → ${sc.pts[g][t]} pts`).join("<br>") : "None yet.";
+      } else {
+        const mine = rows.filter(r => r.station === t && CONFIG.GROUPS.includes(r.team));
+        box.innerHTML = mine.length ? mine.map(r => `${esc(r.team)}: <b>${esc(r.points)}</b>`).join("<br>") : "None yet.";
+      }
+    } catch (e) { box.textContent = e.message; }
+  };
+  $("#hStation").addEventListener("change", () => { store.set("hostStation", $("#hStation").value); setMode(); listMine(); });
+  setMode();
+  $("#hSave").addEventListener("click", async () => {
+    const msg = $("#hMsg"), station = $("#hStation").value, team = $("#hGroup").value, raw = $("#hPts").value.trim();
+    const timed = stOf(station).game === "timed";
+    if (!team) { msg.className = "msg bad"; msg.textContent = "Pick a group."; return; }
+    const val = timed ? parseTime(raw) : (/^\d+$/.test(raw) ? +raw : NaN);
+    if (!Number.isFinite(val) || val < 0) { msg.className = "msg bad"; msg.textContent = timed ? "Enter a time like 1:25 or 85." : "Enter whole-number points."; return; }
+    const shown = timed ? fmtTime(val) : `+${val}`;
+    const btn = $("#hSave"); btn.disabled = true; msg.className = "msg"; msg.textContent = "Saving…";
+    try {
+      const prev = (await scores.list()).filter(r => r.station === station && r.team === team);
+      if (prev.length) {
+        const ask = timed
+          ? `${team} already has a time here. Save ${shown} instead? The latest time counts.`
+          : `${team} already has ${prev.reduce((a, r) => a + (+r.points || 0), 0)} pts here. Add ${val} more on top?`;
+        if (!confirm(ask)) { msg.textContent = ""; btn.disabled = false; return; }
+      }
+      await scores.add({ team, station, points: val, entered_by: timed ? "host-time" : "host" });
+      msg.className = "msg ok"; msg.textContent = `Saved: ${team} ${shown}`;
+      $("#hGroup").value = ""; $("#hPts").value = "";
+      listMine();
+    } catch (e) { msg.className = "msg bad"; msg.textContent = "Couldn't save: " + e.message; }
+    btn.disabled = false;
+  });
+  const doHash = async asPhrase => {
+    const v = $("#hashIn").value; $("#hashOut").textContent = await sha256(asPhrase ? normPhrase(v) : v.trim());
+  };
+  $("#hashPhrase").addEventListener("click", () => doHash(true));
+  $("#hashPin").addEventListener("click", () => doHash(false));
+  listMine();
+}
+
+/* ---------- router ---------- */
+function render() {
+  clearView();
+  const tab = (location.hash || "#team").slice(1);
+  document.querySelectorAll("nav.tabs a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
+  ({ team: viewTeam, board: viewBoard, host: viewHost }[tab] || viewTeam)();
+  window.scrollTo(0, 0);
+}
+window.addEventListener("hashchange", render);
+if (DEMO) $("#demoBanner").classList.remove("hidden");
+render();
+</script>
+</body>
+</html>
