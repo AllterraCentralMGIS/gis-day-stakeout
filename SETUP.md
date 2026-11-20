@@ -95,3 +95,12 @@ Add `?demo=1` to the URL. Fake points, demo phrase is `demo`, scores stay on tha
 - **Repo:** https://github.com/AllterraCentralMGIS/gis-day-stakeout (public, GitHub account AllterraCentralMGIS)
 - **To update:** edit `index.html`, commit, push to `main`. Pages rebuilds in about 30 s.
 - A Claude Artifact was ruled out: its sandbox blocks calls to ArcGIS, outside map tiles, GPS and `confirm()`.
+
+## 7. Passwords — off since 2026-11-20
+
+- Each host walks with one school and runs the app on their own phone, so the app has no passwords.
+- Groups unlock a spot with **We found the cache** (on the card, or on the compass screen within 15 m).
+  It asks once to confirm, so a stray tap doesn't open a game.
+- The Host tab opens without a PIN. It picks the phone's school and the station it unlocked last.
+- To turn passwords back on, see the comment above `REQUIRE_PHRASE` in `index.html`.
+  The phrases (GPS, GNSS, DRONE, GIS, GEO) and PIN 8888 are still stored there as hashes.

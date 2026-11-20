@@ -25,8 +25,11 @@ const CONFIG = {
   // Group N starts at Spot N. Don't rename once real scores exist: scores are saved under these exact names.
   GROUPS: ["King", "DeKaney", "Energy Institute", "Northbrook", "Lee & Humble"],
 
-  // Host PIN, stored as a SHA-256 hash. Make a new one in Host → "Make a hash".
-  HOST_PIN_HASH: "2926a2731f4b312c08982cacf8061eb14bf65c1a87cc5d70e864e079c6220731",
+  // Passwords switched off 2026-11-20: each host walks with one school and runs the app on their phone.
+  // To turn them back on: REQUIRE_PHRASE: true (phrases GPS/GNSS/DRONE/GIS/GEO are still hashed per station below),
+  // and HOST_PIN_HASH: "2926a2731f4b312c08982cacf8061eb14bf65c1a87cc5d70e864e079c6220731" (PIN 8888).
+  REQUIRE_PHRASE: false,
+  HOST_PIN_HASH: "",
 
   // One entry per location, in rotation order (= Location_Number 1–5).
   // objectId links to the layer's OBJECTID. Houston set, OBJECTID 3–7.
@@ -206,6 +209,8 @@ details.card summary { cursor: pointer; }
 
 /* ----- stakeout navigator ----- */
 button.go { width: 100%; margin: 12px 0 2px; font-size: 1.05rem; }
+button.found { width: 100%; margin-top: 10px; background: var(--ok); color: #fff; }
+button.found:hover { background: var(--ok); filter: brightness(1.08); }
 body.nav-open { overflow: hidden; }
 .nav { position: fixed; inset: 0; z-index: 2000; background: var(--bg); overflow-y: auto;
   display: flex; flex-direction: column; gap: 12px;
@@ -453,12 +458,13 @@ async function viewTeam() {
     <div class="card blaze">
       <span class="tag">Stop ${route.indexOf(nextIdx) + 1} of ${N()}</span>
       <h2 style="margin-top:10px">${esc(locs[nextIdx].name)}</h2>
-      <p class="muted" style="margin:0 0 4px">Find the geocache. Inside is a secret phrase.</p>
+      <p class="muted" style="margin:0 0 4px">${CONFIG.REQUIRE_PHRASE ? "Find the geocache. Inside is a secret phrase." : "Find the geocache, then tap “We found the cache”."}</p>
       <p class="coords" id="nextDist">${locs[nextIdx].lat ? `${locs[nextIdx].lat.toFixed(5)}, ${locs[nextIdx].lng.toFixed(5)}` : ""}</p>
       ${locs[nextIdx].lat != null ? `<button class="blaze go" id="startNav">Start stakeout <span aria-hidden="true">→</span></button>` : ""}
-      <label for="phrase">Secret phrase</label>
+      ${CONFIG.REQUIRE_PHRASE ? `<label for="phrase">Secret phrase</label>
       <div class="row"><input id="phrase" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="from the cache">
-        <button class="blaze" id="unlockBtn" style="flex:0 0 auto">Unlock</button></div>
+        <button class="blaze" id="unlockBtn" style="flex:0 0 auto">Unlock</button></div>`
+      : `<button class="found" id="unlockBtn">We found the cache</button>`}
       <div class="msg" id="unlockMsg"></div>
     </div>` : `<div class="card blaze"><h2>Route complete</h2><p>All ${N()} caches found. Head back and check the leaderboard.</p></div>`}
     <h2 class="sec">Your rotation</h2>
@@ -500,16 +506,18 @@ async function viewTeam() {
 
   // unlock (shared by the card and the stakeout screen)
   async function tryUnlock(raw, msg) {
-    if (!normPhrase(raw)) { msg.className = "msg bad"; msg.textContent = "Type the phrase from the cache."; return; }
     const st = CONFIG.STATIONS[nextIdx];
-    const ok = DEMO ? normPhrase(raw) === "demo" : (st.phraseHash && await sha256(normPhrase(raw)) === st.phraseHash);
-    if (!ok) { msg.className = "msg bad"; msg.textContent = DEMO ? "Nope. (Demo phrase is: demo)" : "Not it. Check the cache again."; return; }
+    if (CONFIG.REQUIRE_PHRASE) {
+      if (!normPhrase(raw)) { msg.className = "msg bad"; msg.textContent = "Type the phrase from the cache."; return; }
+      const ok = DEMO ? normPhrase(raw) === "demo" : (st.phraseHash && await sha256(normPhrase(raw)) === st.phraseHash);
+      if (!ok) { msg.className = "msg bad"; msg.textContent = DEMO ? "Nope. (Demo phrase is: demo)" : "Not it. Check the cache again."; return; }
+    } else if (!confirm(`Found the cache at ${locs[nextIdx].name}? This opens its game.`)) return;
     store.set(`unlocked:${g}`, [...unlocked, nextIdx]);
     store.set("openStation", nextIdx);
     store.set("navOpen", false);
     render();
   }
-  $("#unlockBtn")?.addEventListener("click", () => tryUnlock($("#phrase").value, $("#unlockMsg")));
+  $("#unlockBtn")?.addEventListener("click", () => tryUnlock($("#phrase")?.value, $("#unlockMsg")));
   $("#phrase")?.addEventListener("keydown", e => { if (e.key === "Enter") $("#unlockBtn").click(); });
 
   // stakeout navigator
@@ -553,9 +561,10 @@ async function viewTeam() {
       <button class="ghost" id="navCompass" hidden>Turn on compass</button>
       <div class="arrive" id="navArrive" hidden>
         <h3>You're close. Search within about ${ARRIVE} m.</h3>
-        <label for="navPhrase">Secret phrase</label>
+        ${CONFIG.REQUIRE_PHRASE ? `<label for="navPhrase">Secret phrase</label>
         <div class="row"><input id="navPhrase" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="from the cache">
-          <button class="blaze" id="navUnlock" style="flex:0 0 auto">Unlock</button></div>
+          <button class="blaze" id="navUnlock" style="flex:0 0 auto">Unlock</button></div>`
+        : `<button class="found" id="navUnlock">We found the cache</button>`}
         <div class="msg" id="navMsg"></div>
       </div>
       <div id="navMap"></div>`;
@@ -611,8 +620,8 @@ async function viewTeam() {
       if (!ok) { $("#navCompass").textContent = "Compass not available"; $("#navCompass").disabled = true; }
       setTimeout(draw, 600);
     });
-    $("#navUnlock").addEventListener("click", () => tryUnlock($("#navPhrase").value, $("#navMsg")));
-    $("#navPhrase").addEventListener("keydown", e => { if (e.key === "Enter") $("#navUnlock").click(); });
+    $("#navUnlock").addEventListener("click", () => tryUnlock($("#navPhrase")?.value, $("#navMsg")));
+    $("#navPhrase")?.addEventListener("keydown", e => { if (e.key === "Enter") $("#navUnlock").click(); });
     closeNav = () => {
       headingListeners.delete(draw); gpsListeners.delete(draw);
       try { wake?.release(); } catch {}
@@ -708,7 +717,7 @@ async function viewBoard() {
 
 /* ----- HOST ----- */
 function viewHost() {
-  if (!hostSession.get()) {
+  if (CONFIG.HOST_PIN_HASH && !hostSession.get()) {
     app.innerHTML = header("Host") + `<div class="card"><p>Station hosts only.</p>
       <label for="pin">Host PIN</label><input id="pin" type="password" inputmode="numeric">
       <button style="margin-top:12px;width:100%" id="pinBtn">Enter</button><div class="msg" id="pinMsg"></div></div>`;
@@ -720,21 +729,24 @@ function viewHost() {
     $("#pin").addEventListener("keydown", e => e.key === "Enter" && go());
     return;
   }
-  const lastStation = store.get("hostStation", "");
+  // The host's phone belongs to one school: preselect it, and the station it unlocked most recently.
+  const myGroup = store.get("group", null);
+  const lastOpen = store.get("openStation", null);
+  const lastStation = lastOpen !== null && CONFIG.STATIONS[lastOpen] ? CONFIG.STATIONS[lastOpen].title : store.get("hostStation", "");
   app.innerHTML = header("Host") + `
     <div class="card blaze">
       <h2>Enter a score</h2>
-      <label for="hStation">Your station</label>
+      <label for="hStation">Station</label>
       <select id="hStation">${CONFIG.STATIONS.map(s => `<option ${s.title === lastStation ? "selected" : ""}>${esc(s.title)}</option>`).join("")}</select>
       <label for="hGroup">Group</label>
-      <select id="hGroup"><option value="">Pick a group…</option>${CONFIG.GROUPS.map(g => `<option>${esc(g)}</option>`).join("")}</select>
+      <select id="hGroup"><option value="">Pick a group…</option>${CONFIG.GROUPS.map((g, i) => `<option ${i === myGroup ? "selected" : ""}>${esc(g)}</option>`).join("")}</select>
       <label for="hPts" id="hPtsLabel">Points</label>
       <input id="hPts" inputmode="numeric" autocomplete="off">
       <button class="blaze" id="hSave" style="width:100%;margin-top:14px">Save score</button>
       <div class="msg" id="hMsg"></div>
     </div>
     <div class="card"><h3>Your station's scores</h3><div id="hList" class="muted" style="margin-top:8px">…</div></div>
-    <details class="card"><summary><b>Make a hash</b> (organizer setup)</summary>
+    <details class="card" ${CONFIG.REQUIRE_PHRASE || CONFIG.HOST_PIN_HASH ? "" : "hidden"}><summary><b>Make a hash</b> (organizer setup)</summary>
       <p class="muted">Turn a secret phrase or PIN into the hash for the config. Phrases ignore case, spaces and punctuation.</p>
       <label for="hashIn">Phrase or PIN</label><input id="hashIn" autocomplete="off">
       <div class="row" style="margin-top:10px"><button class="ghost" id="hashPhrase">As phrase</button><button class="ghost" id="hashPin">As PIN</button></div>
@@ -781,7 +793,8 @@ function viewHost() {
       }
       await scores.add({ team, station, points: val, entered_by: timed ? "host-time" : "host" });
       msg.className = "msg ok"; msg.textContent = `Saved: ${team} ${shown}`;
-      $("#hGroup").value = ""; $("#hPts").value = "";
+      if (myGroup === null) $("#hGroup").value = "";
+      $("#hPts").value = "";
       listMine();
     } catch (e) { msg.className = "msg bad"; msg.textContent = "Couldn't save: " + e.message; }
     btn.disabled = false;
