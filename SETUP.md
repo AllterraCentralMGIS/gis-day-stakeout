@@ -79,6 +79,12 @@ Everyone moves to the next station in order, so no two groups share a spot.
   It switches back only past 22 m, so it doesn't flicker at the edge.
 - The screen stays awake while it's open, where the phone allows it.
 
+## 4c. Reset a phone
+
+- Open https://allterracentralmgis.github.io/gis-day-stakeout/?reset to wipe that phone's group,
+  unlocked spots, quiz state and host login. It goes back to "Pick your group".
+- Saved scores in ArcGIS are not touched. A retaken quiz can't score twice for the same school and spot.
+
 ## 5. Rehearse
 
 Add `?demo=1` to the URL. Fake points, demo phrase is `demo`, scores stay on that phone.

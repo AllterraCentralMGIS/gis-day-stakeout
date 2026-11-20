@@ -804,6 +804,25 @@ function render() {
 }
 window.addEventListener("hashchange", render);
 if (DEMO) $("#demoBanner").classList.remove("hidden");
+
+/* ?reset wipes this phone's group, unlocked spots, quiz state and host login, then starts fresh.
+   Saved scores in ArcGIS are untouched, and a retaken quiz can't score twice. */
+(() => {
+  const qs = new URLSearchParams(location.search);
+  if (!qs.has("reset")) return;
+  try { Object.keys(localStorage).filter(k => k.startsWith("stakeout:")).forEach(k => localStorage.removeItem(k)); } catch {}
+  try { Object.keys(sessionStorage).filter(k => k.startsWith("stakeout:")).forEach(k => sessionStorage.removeItem(k)); } catch {}
+  Object.keys(mem).forEach(k => delete mem[k]);
+  hostSession.ok = false;
+  qs.delete("reset");
+  const rest = qs.toString();
+  history.replaceState(null, "", location.pathname + (rest ? "?" + rest : "") + "#team");
+  const note = document.createElement("div");
+  note.className = "banner"; note.setAttribute("role", "status");
+  note.textContent = "This phone was reset. Pick your group to start over.";
+  document.body.prepend(note);
+  setTimeout(() => note.remove(), 6000);
+})();
 render();
 </script>
 </body>
