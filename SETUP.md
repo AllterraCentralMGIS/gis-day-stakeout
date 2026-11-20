@@ -72,7 +72,9 @@ Everyone moves to the next station in order, so no two groups share a spot.
 
 Add `?demo=1` to the URL. Fake points, demo phrase is `demo`, scores stay on that phone.
 
-## 6. Host it
+## 6. Hosting — live 2026-11-19
 
-Any static host works: GitHub Pages, Netlify, or your org's web server.
-It must be served over **https** so phones allow GPS.
+- **Live URL:** https://allterracentralmgis.github.io/gis-day-stakeout/
+- **Repo:** https://github.com/AllterraCentralMGIS/gis-day-stakeout (public, GitHub account AllterraCentralMGIS)
+- **To update:** edit `index.html`, commit, push to `main`. Pages rebuilds in about 30 s.
+- A Claude Artifact was ruled out: its sandbox blocks calls to ArcGIS, outside map tiles, GPS and `confirm()`.
